@@ -27,9 +27,9 @@ package redis
 import (
 	"time"
 
+	cache "github.com/cludden/http-cache"
 	redisCache "github.com/go-redis/cache"
 	"github.com/go-redis/redis"
-	cache "github.com/victorspringer/http-cache"
 	"github.com/vmihailenco/msgpack"
 )
 
@@ -42,9 +42,9 @@ type Adapter struct {
 type RingOptions redis.RingOptions
 
 // Get implements the cache Adapter interface Get method.
-func (a *Adapter) Get(key uint64) ([]byte, bool) {
+func (a *Adapter) Get(key string) ([]byte, bool) {
 	var c []byte
-	if err := a.store.Get(cache.KeyAsString(key), &c); err == nil {
+	if err := a.store.Get(key, &c); err == nil {
 		return c, true
 	}
 
@@ -52,17 +52,17 @@ func (a *Adapter) Get(key uint64) ([]byte, bool) {
 }
 
 // Set implements the cache Adapter interface Set method.
-func (a *Adapter) Set(key uint64, response []byte, expiration time.Time) {
+func (a *Adapter) Set(key string, response []byte, expiration time.Time) {
 	a.store.Set(&redisCache.Item{
-		Key:        cache.KeyAsString(key),
+		Key:        key,
 		Object:     response,
-		Expiration: expiration.Sub(time.Now()),
+		Expiration: time.Until(expiration),
 	})
 }
 
 // Release implements the cache Adapter interface Release method.
-func (a *Adapter) Release(key uint64) {
-	a.store.Delete(cache.KeyAsString(key))
+func (a *Adapter) Release(key string) {
+	a.store.Delete(key)
 }
 
 // NewAdapter initializes Redis adapter.

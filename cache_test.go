@@ -15,12 +15,12 @@ import (
 
 type adapterMock struct {
 	sync.Mutex
-	store map[uint64][]byte
+	store map[string][]byte
 }
 
 type errReader int
 
-func (a *adapterMock) Get(key uint64) ([]byte, bool) {
+func (a *adapterMock) Get(key string) ([]byte, bool) {
 	a.Lock()
 	defer a.Unlock()
 	if _, ok := a.store[key]; ok {
@@ -29,13 +29,13 @@ func (a *adapterMock) Get(key uint64) ([]byte, bool) {
 	return nil, false
 }
 
-func (a *adapterMock) Set(key uint64, response []byte, expiration time.Time) {
+func (a *adapterMock) Set(key string, response []byte, expiration time.Time) {
 	a.Lock()
 	defer a.Unlock()
 	a.store[key] = response
 }
 
-func (a *adapterMock) Release(key uint64) {
+func (a *adapterMock) Release(key string) {
 	a.Lock()
 	defer a.Unlock()
 	delete(a.store, key)
@@ -52,20 +52,20 @@ func TestMiddleware(t *testing.T) {
 	})
 
 	adapter := &adapterMock{
-		store: map[uint64][]byte{
-			14974843192121052621: Response{
+		store: map[string][]byte{
+			"http://foo.bar/test-1": Response{
 				Value:      []byte("value 1"),
 				Expiration: time.Now().Add(1 * time.Minute),
 			}.Bytes(),
-			14974839893586167988: Response{
+			"http://foo.bar/test-2": Response{
 				Value:      []byte("value 2"),
 				Expiration: time.Now().Add(1 * time.Minute),
 			}.Bytes(),
-			14974840993097796199: Response{
+			"http://foo.bar/test-3": Response{
 				Value:      []byte("value 3"),
 				Expiration: time.Now().Add(-1 * time.Minute),
 			}.Bytes(),
-			10956846073361780255: Response{
+			"http://foo.bar/test-4": Response{
 				Value:      []byte("value 4"),
 				Expiration: time.Now().Add(-1 * time.Minute),
 			}.Bytes(),
@@ -73,10 +73,12 @@ func TestMiddleware(t *testing.T) {
 	}
 
 	client, _ := NewClient(
-		ClientWithAdapter(adapter),
-		ClientWithTTL(1*time.Minute),
-		ClientWithRefreshKey("rk"),
-		ClientWithMethods([]string{http.MethodGet, http.MethodPost}),
+		WithAdapter(adapter),
+		WithTTL(1*time.Minute),
+		WithRefreshKey("rk"),
+		WithCacheable(func(r *http.Request) bool {
+			return r.Method == http.MethodGet || r.Method == http.MethodPost
+		}),
 	)
 
 	handler := client.Middleware(httpTestHandler)
@@ -90,7 +92,7 @@ func TestMiddleware(t *testing.T) {
 		wantCode int
 	}{
 		{
-			"returns cached response",
+			"returns cached response #1",
 			"http://foo.bar/test-1",
 			"GET",
 			nil,
@@ -98,7 +100,7 @@ func TestMiddleware(t *testing.T) {
 			200,
 		},
 		{
-			"returns new response",
+			"returns new response #2",
 			"http://foo.bar/test-2",
 			"PUT",
 			nil,
@@ -106,7 +108,7 @@ func TestMiddleware(t *testing.T) {
 			200,
 		},
 		{
-			"returns cached response",
+			"returns cached response #3",
 			"http://foo.bar/test-2",
 			"GET",
 			nil,
@@ -114,7 +116,7 @@ func TestMiddleware(t *testing.T) {
 			200,
 		},
 		{
-			"returns new response",
+			"returns new response #4",
 			"http://foo.bar/test-3?zaz=baz&baz=zaz",
 			"GET",
 			nil,
@@ -122,7 +124,7 @@ func TestMiddleware(t *testing.T) {
 			200,
 		},
 		{
-			"returns cached response",
+			"returns cached response #5",
 			"http://foo.bar/test-3?baz=zaz&zaz=baz",
 			"GET",
 			nil,
@@ -130,7 +132,7 @@ func TestMiddleware(t *testing.T) {
 			200,
 		},
 		{
-			"cache expired",
+			"cache expired #6",
 			"http://foo.bar/test-3",
 			"GET",
 			nil,
@@ -138,7 +140,7 @@ func TestMiddleware(t *testing.T) {
 			200,
 		},
 		{
-			"releases cached response and returns new response",
+			"releases cached response and returns new response #7",
 			"http://foo.bar/test-2?rk=true",
 			"GET",
 			nil,
@@ -146,7 +148,7 @@ func TestMiddleware(t *testing.T) {
 			200,
 		},
 		{
-			"returns new cached response",
+			"returns new cached response #8",
 			"http://foo.bar/test-2",
 			"GET",
 			nil,
@@ -154,7 +156,7 @@ func TestMiddleware(t *testing.T) {
 			200,
 		},
 		{
-			"returns new cached response",
+			"returns new cached response #9",
 			"http://foo.bar/test-2",
 			"POST",
 			[]byte(`{"foo": "bar"}`),
@@ -162,7 +164,7 @@ func TestMiddleware(t *testing.T) {
 			200,
 		},
 		{
-			"returns new cached response",
+			"returns new cached response #10",
 			"http://foo.bar/test-2",
 			"POST",
 			[]byte(`{"foo": "bar"}`),
@@ -170,7 +172,7 @@ func TestMiddleware(t *testing.T) {
 			200,
 		},
 		{
-			"ignores request body",
+			"ignores request body #11",
 			"http://foo.bar/test-2",
 			"GET",
 			[]byte(`{"foo": "bar"}`),
@@ -178,7 +180,7 @@ func TestMiddleware(t *testing.T) {
 			200,
 		},
 		{
-			"returns new response",
+			"returns new response #12",
 			"http://foo.bar/test-2",
 			"POST",
 			[]byte(`{"foo": "bar"}`),
@@ -215,7 +217,7 @@ func TestMiddleware(t *testing.T) {
 				return
 			}
 			if !reflect.DeepEqual(w.Body.String(), tt.wantBody) {
-				t.Errorf("*Client.Middleware() = %v, want %v", w.Body.String(), tt.wantBody)
+				t.Errorf("%s error: got '%v', expected '%v'", tt.name, w.Body.String(), tt.wantBody)
 			}
 		})
 	}
@@ -272,7 +274,7 @@ func TestResponseToBytes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			b := tt.response.Bytes()
-			if b == nil || len(b) == 0 {
+			if len(b) == 0 {
 				t.Error("Bytes() failed to convert")
 				return
 			}
@@ -313,8 +315,12 @@ func TestGenerateKeyString(t *testing.T) {
 
 	keys := make(map[string]string, len(urls))
 	for _, u := range urls {
-		rawKey := generateKey(u)
-		key := KeyAsString(rawKey)
+		r, err := http.NewRequest(http.MethodGet, u, nil)
+		if err != nil {
+			t.Fatalf("error initializing request for url: %v", err)
+		}
+
+		key, _ := generateKey(r)
 
 		if otherURL, found := keys[key]; found {
 			t.Fatalf("URLs %s and %s share the same key %s", u, otherURL, key)
@@ -327,154 +333,32 @@ func TestGenerateKey(t *testing.T) {
 	tests := []struct {
 		name string
 		URL  string
-		want uint64
+		want string
 	}{
 		{
 			"get url checksum",
 			"http://foo.bar/test-1",
-			14974843192121052621,
+			"http://foo.bar/test-1",
 		},
 		{
 			"get url 2 checksum",
 			"http://foo.bar/test-2",
-			14974839893586167988,
+			"http://foo.bar/test-2",
 		},
 		{
 			"get url 3 checksum",
 			"http://foo.bar/test-3",
-			14974840993097796199,
+			"http://foo.bar/test-3",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := generateKey(tt.URL); got != tt.want {
+			r, err := http.NewRequest(http.MethodGet, tt.URL, nil)
+			if err != nil {
+				t.Fatalf("error initializing request for url: %v", err)
+			}
+			if got, _ := generateKey(r); got != tt.want {
 				t.Errorf("generateKey() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestGenerateKeyWithBody(t *testing.T) {
-	tests := []struct {
-		name string
-		URL  string
-		body []byte
-		want uint64
-	}{
-		{
-			"get POST checksum",
-			"http://foo.bar/test-1",
-			[]byte(`{"foo": "bar"}`),
-			16224051135567554746,
-		},
-		{
-			"get POST 2 checksum",
-			"http://foo.bar/test-1",
-			[]byte(`{"bar": "foo"}`),
-			3604153880186288164,
-		},
-		{
-			"get POST 3 checksum",
-			"http://foo.bar/test-2",
-			[]byte(`{"foo": "bar"}`),
-			10956846073361780255,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := generateKeyWithBody(tt.URL, tt.body); got != tt.want {
-				t.Errorf("generateKeyWithBody() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestNewClient(t *testing.T) {
-	adapter := &adapterMock{}
-
-	tests := []struct {
-		name    string
-		opts    []ClientOption
-		want    *Client
-		wantErr bool
-	}{
-		{
-			"returns new client",
-			[]ClientOption{
-				ClientWithAdapter(adapter),
-				ClientWithTTL(1 * time.Millisecond),
-				ClientWithMethods([]string{http.MethodGet, http.MethodPost}),
-			},
-			&Client{
-				adapter:    adapter,
-				ttl:        1 * time.Millisecond,
-				refreshKey: "",
-				methods:    []string{http.MethodGet, http.MethodPost},
-			},
-			false,
-		},
-		{
-			"returns new client with refresh key",
-			[]ClientOption{
-				ClientWithAdapter(adapter),
-				ClientWithTTL(1 * time.Millisecond),
-				ClientWithRefreshKey("rk"),
-			},
-			&Client{
-				adapter:    adapter,
-				ttl:        1 * time.Millisecond,
-				refreshKey: "rk",
-				methods:    []string{http.MethodGet},
-			},
-			false,
-		},
-		{
-			"returns error",
-			[]ClientOption{
-				ClientWithAdapter(adapter),
-			},
-			nil,
-			true,
-		},
-		{
-			"returns error",
-			[]ClientOption{
-				ClientWithTTL(1 * time.Millisecond),
-				ClientWithRefreshKey("rk"),
-			},
-			nil,
-			true,
-		},
-		{
-			"returns error",
-			[]ClientOption{
-				ClientWithAdapter(adapter),
-				ClientWithTTL(0),
-				ClientWithRefreshKey("rk"),
-			},
-			nil,
-			true,
-		},
-		{
-			"returns error",
-			[]ClientOption{
-				ClientWithAdapter(adapter),
-				ClientWithTTL(1 * time.Millisecond),
-				ClientWithMethods([]string{http.MethodGet, http.MethodPut}),
-			},
-			nil,
-			true,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := NewClient(tt.opts...)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("NewClient() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("NewClient() = %v, want %v", got, tt.want)
 			}
 		})
 	}

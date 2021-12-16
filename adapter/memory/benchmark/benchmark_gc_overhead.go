@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/allegro/bigcache"
-	"github.com/victorspringer/http-cache/adapter/memory"
+	"github.com/cludden/http-cache/adapter/memory"
 )
 
 const (
@@ -41,11 +41,11 @@ func benchmarkHTTPCacheMemoryAdapter() {
 
 	for i := 0; i < entries; i++ {
 		key, val := generateKeyValue(i, valueSize)
-		cache.Set(uint64(key), val, expiration)
+		cache.Set(key, val, expiration)
 	}
 
 	firstKey, _ := generateKeyValue(1, valueSize)
-	checkFirstElementBool(cache.Get(uint64(firstKey)))
+	checkFirstElementBool(cache.Get(firstKey))
 
 	fmt.Println("GC pause for http-cache memory adapter: ", gcPause())
 
@@ -94,8 +94,8 @@ func checkFirstElement(val []byte, err error) {
 	}
 }
 
-func generateKeyValue(index int, valSize int) (int, []byte) {
-	key := index
+func generateKeyValue(index int, valSize int) (string, []byte) {
+	key := fmt.Sprintf("%d", index)
 	fixedNumber := []byte(fmt.Sprintf("%010d", index))
 	val := append(make([]byte, valSize-10), fixedNumber...)
 

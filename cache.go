@@ -29,16 +29,29 @@ import (
 	"encoding/gob"
 	"errors"
 	"fmt"
-	"hash/fnv"
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 )
+
+// Adapter interface for HTTP cache middleware client.
+type Adapter interface {
+	// Get retrieves the cached response by a given key. It also
+	// returns true or false, whether it exists or not.
+	Get(key string) ([]byte, bool)
+
+	// Set caches a response for a given key until an expiration date.
+	Set(key string, response []byte, expiration time.Time)
+
+	// Release frees cache for a given key.
+	Release(key string)
+}
+
+// =============================================================================
 
 // Response is the cached response data structure.
 type Response struct {
@@ -60,55 +73,143 @@ type Response struct {
 	Frequency int
 }
 
-// Client data structure for HTTP cache middleware.
-type Client struct {
-	adapter    Adapter
-	ttl        time.Duration
-	refreshKey string
-	methods    []string
+// BytesToResponse converts bytes array into Response data structure.
+func BytesToResponse(b []byte) Response {
+	var r Response
+	dec := gob.NewDecoder(bytes.NewReader(b))
+	dec.Decode(&r)
+
+	return r
 }
+
+// Bytes converts Response data structure into bytes array.
+func (r Response) Bytes() []byte {
+	var b bytes.Buffer
+	enc := gob.NewEncoder(&b)
+	enc.Encode(&r)
+
+	return b.Bytes()
+}
+
+// =============================================================================
 
 // ClientOption is used to set Client settings.
 type ClientOption func(c *Client) error
 
-// Adapter interface for HTTP cache middleware client.
-type Adapter interface {
-	// Get retrieves the cached response by a given key. It also
-	// returns true or false, whether it exists or not.
-	Get(key uint64) ([]byte, bool)
+// WithAdapter sets the adapter type for the HTTP cache
+// middleware client.
+func WithAdapter(a Adapter) ClientOption {
+	return func(c *Client) error {
+		c.adapter = a
+		return nil
+	}
+}
 
-	// Set caches a response for a given key until an expiration date.
-	Set(key uint64, response []byte, expiration time.Time)
+// WithCacheable overrides the default cachable function
+func WithCacheable(fn func(*http.Request) bool) ClientOption {
+	return func(c *Client) error {
+		if fn == nil {
+			return fmt.Errorf("cacheable function can not be nil")
+		}
+		c.cacheableFn = fn
+		return nil
+	}
+}
 
-	// Release frees cache for a given key.
-	Release(key uint64)
+// WithKey configues the key generation function
+func WithKey(fn func(*http.Request) (string, error)) ClientOption {
+	return func(c *Client) error {
+		if fn == nil {
+			return fmt.Errorf("key function can not be nil")
+		}
+		c.keygenFn = fn
+		return nil
+	}
+}
+
+// WithRefreshKey sets the parameter key used to free a request
+// cached response. Optional setting.
+func WithRefreshKey(refreshKey string) ClientOption {
+	return func(c *Client) error {
+		c.refreshKey = refreshKey
+		return nil
+	}
+}
+
+// WithTTL sets how long each response is going to be cached.
+func WithTTL(ttl time.Duration) ClientOption {
+	return func(c *Client) error {
+		if int64(ttl) < 1 {
+			return fmt.Errorf("cache client ttl %v is invalid", ttl)
+		}
+
+		c.ttl = ttl
+
+		return nil
+	}
+}
+
+// =============================================================================
+
+// Client data structure for HTTP cache middleware.
+type Client struct {
+	adapter     Adapter
+	cacheableFn func(*http.Request) bool
+	keygenFn    func(*http.Request) (string, error)
+	ttl         time.Duration
+	refreshKey  string
+	methods     []string
+}
+
+// NewClient initializes the cache HTTP middleware client with the given
+// options.
+func NewClient(opts ...ClientOption) (*Client, error) {
+	c := &Client{}
+
+	for _, opt := range opts {
+		if err := opt(c); err != nil {
+			return nil, err
+		}
+	}
+
+	if c.adapter == nil {
+		return nil, errors.New("cache client adapter is not set")
+	}
+	if c.cacheableFn == nil {
+		c.cacheableFn = isCacheable
+	}
+	if c.keygenFn == nil {
+		c.keygenFn = generateKey
+	}
+	if int64(c.ttl) < 1 {
+		return nil, errors.New("cache client ttl is not set")
+	}
+	if c.methods == nil {
+		c.methods = []string{http.MethodGet}
+	}
+
+	return c, nil
 }
 
 // Middleware is the HTTP cache middleware handler.
 func (c *Client) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if c.cacheableMethod(r.Method) {
+		if c.cacheableFn(r) {
+			params := r.URL.Query()
+			_, isRefresh := params[c.refreshKey]
+			if isRefresh {
+				delete(params, c.refreshKey)
+				r.URL.RawQuery = params.Encode()
+			}
 			sortURLParams(r.URL)
-			key := generateKey(r.URL.String())
-			if r.Method == http.MethodPost && r.Body != nil {
-				body, err := ioutil.ReadAll(r.Body)
-				defer r.Body.Close()
-				if err != nil {
-					next.ServeHTTP(w, r)
-					return
-				}
-				reader := ioutil.NopCloser(bytes.NewBuffer(body))
-				key = generateKeyWithBody(r.URL.String(), body)
-				r.Body = reader
+
+			key, err := c.keygenFn(r)
+			if err != nil {
+				next.ServeHTTP(w, r)
+				return
 			}
 
-			params := r.URL.Query()
-			if _, ok := params[c.refreshKey]; ok {
-				delete(params, c.refreshKey)
-
-				r.URL.RawQuery = params.Encode()
-				key = generateKey(r.URL.String())
-
+			if isRefresh {
 				c.adapter.Release(key)
 			} else {
 				b, ok := c.adapter.Get(key)
@@ -160,31 +261,21 @@ func (c *Client) Middleware(next http.Handler) http.Handler {
 	})
 }
 
-func (c *Client) cacheableMethod(method string) bool {
-	for _, m := range c.methods {
-		if method == m {
-			return true
+// =============================================================================
+
+func generateKey(r *http.Request) (string, error) {
+	if r.Method == http.MethodPost {
+		body, err := ioutil.ReadAll(r.Body)
+		if err != nil {
+			return "", fmt.Errorf("error reading body: %v", err)
 		}
+		return fmt.Sprintf("%s%s", r.URL.String(), string(body)), nil
 	}
-	return false
+	return r.URL.String(), nil
 }
 
-// BytesToResponse converts bytes array into Response data structure.
-func BytesToResponse(b []byte) Response {
-	var r Response
-	dec := gob.NewDecoder(bytes.NewReader(b))
-	dec.Decode(&r)
-
-	return r
-}
-
-// Bytes converts Response data structure into bytes array.
-func (r Response) Bytes() []byte {
-	var b bytes.Buffer
-	enc := gob.NewEncoder(&b)
-	enc.Encode(&r)
-
-	return b.Bytes()
+func isCacheable(r *http.Request) bool {
+	return r.Method == http.MethodGet
 }
 
 func sortURLParams(URL *url.URL) {
@@ -195,93 +286,4 @@ func sortURLParams(URL *url.URL) {
 		})
 	}
 	URL.RawQuery = params.Encode()
-}
-
-// KeyAsString can be used by adapters to convert the cache key from uint64 to string.
-func KeyAsString(key uint64) string {
-	return strconv.FormatUint(key, 36)
-}
-
-func generateKey(URL string) uint64 {
-	hash := fnv.New64a()
-	hash.Write([]byte(URL))
-
-	return hash.Sum64()
-}
-
-func generateKeyWithBody(URL string, body []byte) uint64 {
-	hash := fnv.New64a()
-	body = append([]byte(URL), body...)
-	hash.Write(body)
-
-	return hash.Sum64()
-}
-
-// NewClient initializes the cache HTTP middleware client with the given
-// options.
-func NewClient(opts ...ClientOption) (*Client, error) {
-	c := &Client{}
-
-	for _, opt := range opts {
-		if err := opt(c); err != nil {
-			return nil, err
-		}
-	}
-
-	if c.adapter == nil {
-		return nil, errors.New("cache client adapter is not set")
-	}
-	if int64(c.ttl) < 1 {
-		return nil, errors.New("cache client ttl is not set")
-	}
-	if c.methods == nil {
-		c.methods = []string{http.MethodGet}
-	}
-
-	return c, nil
-}
-
-// ClientWithAdapter sets the adapter type for the HTTP cache
-// middleware client.
-func ClientWithAdapter(a Adapter) ClientOption {
-	return func(c *Client) error {
-		c.adapter = a
-		return nil
-	}
-}
-
-// ClientWithTTL sets how long each response is going to be cached.
-func ClientWithTTL(ttl time.Duration) ClientOption {
-	return func(c *Client) error {
-		if int64(ttl) < 1 {
-			return fmt.Errorf("cache client ttl %v is invalid", ttl)
-		}
-
-		c.ttl = ttl
-
-		return nil
-	}
-}
-
-// ClientWithRefreshKey sets the parameter key used to free a request
-// cached response. Optional setting.
-func ClientWithRefreshKey(refreshKey string) ClientOption {
-	return func(c *Client) error {
-		c.refreshKey = refreshKey
-		return nil
-	}
-}
-
-// ClientWithMethods sets the acceptable HTTP methods to be cached.
-// Optional setting. If not set, default is "GET".
-func ClientWithMethods(methods []string) ClientOption {
-	return func(c *Client) error {
-		for _, method := range methods {
-			if method != http.MethodGet && method != http.MethodPost {
-				return fmt.Errorf("invalid method %s", method)
-			}
-		}
-		c.methods = methods
-		return nil
-	}
 }

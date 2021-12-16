@@ -1,13 +1,14 @@
 package main
 
 import (
+	"fmt"
 	"math/rand"
 	"testing"
 	"time"
 
 	"github.com/allegro/bigcache"
-	cache "github.com/victorspringer/http-cache"
-	"github.com/victorspringer/http-cache/adapter/memory"
+	cache "github.com/cludden/http-cache"
+	"github.com/cludden/http-cache/adapter/memory"
 )
 
 const maxEntrySize = 256
@@ -15,14 +16,14 @@ const maxEntrySize = 256
 func BenchmarkHTTPCacheMamoryAdapterSet(b *testing.B) {
 	cache, expiration := initHTTPCacheMamoryAdapter(b.N)
 	for i := 0; i < b.N; i++ {
-		cache.Set(uint64(i), value(), expiration)
+		cache.Set(fmt.Sprintf("%d", i), value(), expiration)
 	}
 }
 
 func BenchmarkBigCacheSet(b *testing.B) {
 	cache := initBigCache(b.N)
 	for i := 0; i < b.N; i++ {
-		cache.Set(string(i), value())
+		cache.Set(fmt.Sprintf("%d", i), value())
 	}
 }
 
@@ -30,12 +31,12 @@ func BenchmarkHTTPCacheMamoryAdapterGet(b *testing.B) {
 	b.StopTimer()
 	cache, expiration := initHTTPCacheMamoryAdapter(b.N)
 	for i := 0; i < b.N; i++ {
-		cache.Set(uint64(i), value(), expiration)
+		cache.Set(fmt.Sprintf("%d", i), value(), expiration)
 	}
 
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
-		cache.Get(uint64(i))
+		cache.Get(fmt.Sprintf("%d", i))
 	}
 }
 
@@ -43,12 +44,12 @@ func BenchmarkBigCacheGet(b *testing.B) {
 	b.StopTimer()
 	cache := initBigCache(b.N)
 	for i := 0; i < b.N; i++ {
-		cache.Set(string(i), value())
+		cache.Set(fmt.Sprintf("%d", i), value())
 	}
 
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
-		cache.Get(string(i))
+		cache.Get(fmt.Sprintf("%d", i))
 	}
 }
 
@@ -84,14 +85,14 @@ func BenchmarkHTTPCacheMemoryAdapterGetParallel(b *testing.B) {
 	b.StopTimer()
 	cache, expiration := initHTTPCacheMamoryAdapter(b.N)
 	for i := 0; i < b.N; i++ {
-		cache.Set(uint64(i), value(), expiration)
+		cache.Set(fmt.Sprintf("%d", i), value(), expiration)
 	}
 
 	b.StartTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		counter := 0
 		for pb.Next() {
-			cache.Get(uint64(counter))
+			cache.Get(fmt.Sprintf("%d", counter))
 			counter = counter + 1
 		}
 	})
@@ -101,14 +102,14 @@ func BenchmarkBigCacheGetParallel(b *testing.B) {
 	b.StopTimer()
 	cache := initBigCache(b.N)
 	for i := 0; i < b.N; i++ {
-		cache.Set(string(i), value())
+		cache.Set(fmt.Sprintf("%d", i), value())
 	}
 
 	b.StartTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		counter := 0
 		for pb.Next() {
-			cache.Get(string(counter))
+			cache.Get(fmt.Sprintf("%d", counter))
 			counter = counter + 1
 		}
 	})
@@ -118,8 +119,8 @@ func value() []byte {
 	return make([]byte, 100)
 }
 
-func parallelKey(threadID int, counter int) uint64 {
-	return uint64(threadID)
+func parallelKey(threadID int, counter int) string {
+	return fmt.Sprintf("%d", threadID)
 }
 
 func initHTTPCacheMamoryAdapter(entries int) (cache.Adapter, time.Time) {

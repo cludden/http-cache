@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/victorspringer/http-cache"
+	cache "github.com/cludden/http-cache"
 )
 
 func TestGet(t *testing.T) {
@@ -14,8 +14,8 @@ func TestGet(t *testing.T) {
 		sync.RWMutex{},
 		2,
 		LRU,
-		map[uint64][]byte{
-			14974843192121052621: cache.Response{
+		map[string][]byte{
+			"https://example.com/foo": cache.Response{
 				Value:      []byte("value 1"),
 				Expiration: time.Now(),
 				LastAccess: time.Now(),
@@ -26,19 +26,19 @@ func TestGet(t *testing.T) {
 
 	tests := []struct {
 		name string
-		key  uint64
+		key  string
 		want []byte
 		ok   bool
 	}{
 		{
 			"returns right response",
-			14974843192121052621,
+			"https://example.com/foo",
 			[]byte("value 1"),
 			true,
 		},
 		{
 			"not found",
-			123,
+			"https://example.com/bar",
 			nil,
 			false,
 		},
@@ -63,17 +63,17 @@ func TestSet(t *testing.T) {
 		sync.RWMutex{},
 		2,
 		LRU,
-		make(map[uint64][]byte),
+		make(map[string][]byte),
 	}
 
 	tests := []struct {
 		name     string
-		key      uint64
+		key      string
 		response cache.Response
 	}{
 		{
 			"sets a response cache",
-			1,
+			"https://example.com/foo",
 			cache.Response{
 				Value:      []byte("value 1"),
 				Expiration: time.Now().Add(1 * time.Minute),
@@ -81,7 +81,7 @@ func TestSet(t *testing.T) {
 		},
 		{
 			"sets a response cache",
-			2,
+			"https://example.com/bar",
 			cache.Response{
 				Value:      []byte("value 2"),
 				Expiration: time.Now().Add(1 * time.Minute),
@@ -89,7 +89,7 @@ func TestSet(t *testing.T) {
 		},
 		{
 			"sets a response cache",
-			3,
+			"https://example.com/baz",
 			cache.Response{
 				Value:      []byte("value 3"),
 				Expiration: time.Now().Add(1 * time.Minute),
@@ -113,16 +113,16 @@ func TestRelease(t *testing.T) {
 		sync.RWMutex{},
 		2,
 		LRU,
-		map[uint64][]byte{
-			14974843192121052621: cache.Response{
+		map[string][]byte{
+			"https://example.com/foo": cache.Response{
 				Expiration: time.Now().Add(1 * time.Minute),
 				Value:      []byte("value 1"),
 			}.Bytes(),
-			14974839893586167988: cache.Response{
+			"https://example.com/bar": cache.Response{
 				Expiration: time.Now(),
 				Value:      []byte("value 2"),
 			}.Bytes(),
-			14974840993097796199: cache.Response{
+			"https://example.com/baz": cache.Response{
 				Expiration: time.Now(),
 				Value:      []byte("value 3"),
 			}.Bytes(),
@@ -131,19 +131,19 @@ func TestRelease(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		key         uint64
+		key         string
 		storeLength int
 		wantErr     bool
 	}{
 		{
 			"removes cached response from store",
-			14974843192121052621,
+			"https://example.com/foo",
 			2,
 			false,
 		},
 		{
 			"removes cached response from store",
-			14974839893586167988,
+			"https://example.com/bar",
 			1,
 			false,
 		},
@@ -153,86 +153,6 @@ func TestRelease(t *testing.T) {
 			a.Release(tt.key)
 			if len(a.store) > tt.storeLength {
 				t.Errorf("memory.Release() error; store length = %v, want 0", len(a.store))
-			}
-		})
-	}
-}
-
-func TestEvict(t *testing.T) {
-	tests := []struct {
-		name      string
-		algorithm Algorithm
-	}{
-		{
-			"lru removes third cached response",
-			LRU,
-		},
-		{
-			"mru removes first cached response",
-			MRU,
-		},
-		{
-			"lfu removes second cached response",
-			LFU,
-		},
-		{
-			"mfu removes third cached response",
-			MFU,
-		},
-	}
-	count := 0
-	for _, tt := range tests {
-		count++
-
-		a := &Adapter{
-			sync.RWMutex{},
-			2,
-			tt.algorithm,
-			map[uint64][]byte{
-				14974843192121052621: cache.Response{
-					Value:      []byte("value 1"),
-					Expiration: time.Now().Add(1 * time.Minute),
-					LastAccess: time.Now().Add(-1 * time.Minute),
-					Frequency:  2,
-				}.Bytes(),
-				14974839893586167988: cache.Response{
-					Value:      []byte("value 2"),
-					Expiration: time.Now().Add(1 * time.Minute),
-					LastAccess: time.Now().Add(-2 * time.Minute),
-					Frequency:  1,
-				}.Bytes(),
-				14974840993097796199: cache.Response{
-					Value:      []byte("value 3"),
-					Expiration: time.Now().Add(1 * time.Minute),
-					LastAccess: time.Now().Add(-3 * time.Minute),
-					Frequency:  3,
-				}.Bytes(),
-			},
-		}
-		t.Run(tt.name, func(t *testing.T) {
-			a.evict()
-
-			if count == 1 {
-				if _, ok := a.store[14974840993097796199]; ok {
-					t.Errorf("lru is not working properly")
-					return
-				}
-			} else if count == 2 {
-				if _, ok := a.store[14974843192121052621]; ok {
-					t.Errorf("mru is not working properly")
-					return
-				}
-			} else if count == 3 {
-				if _, ok := a.store[14974839893586167988]; ok {
-					t.Errorf("lfu is not working properly")
-					return
-				}
-			} else {
-				if count == 4 {
-					if _, ok := a.store[14974840993097796199]; ok {
-						t.Errorf("mfu is not working properly")
-					}
-				}
 			}
 		})
 	}
@@ -255,7 +175,7 @@ func TestNewAdapter(t *testing.T) {
 				sync.RWMutex{},
 				4,
 				LRU,
-				make(map[uint64][]byte),
+				make(map[string][]byte),
 			},
 			false,
 		},

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/victorspringer/http-cache"
+	cache "github.com/cludden/http-cache"
 )
 
 var a cache.Adapter
@@ -19,12 +19,12 @@ func TestSet(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		key      uint64
+		key      string
 		response []byte
 	}{
 		{
 			"sets a response cache",
-			1,
+			"https://example.com/foo",
 			cache.Response{
 				Value:      []byte("value 1"),
 				Expiration: time.Now().Add(1 * time.Minute),
@@ -32,7 +32,7 @@ func TestSet(t *testing.T) {
 		},
 		{
 			"sets a response cache",
-			2,
+			"https://example.com/bar",
 			cache.Response{
 				Value:      []byte("value 2"),
 				Expiration: time.Now().Add(1 * time.Minute),
@@ -40,7 +40,7 @@ func TestSet(t *testing.T) {
 		},
 		{
 			"sets a response cache",
-			3,
+			"https://example.com/baz",
 			cache.Response{
 				Value:      []byte("value 3"),
 				Expiration: time.Now().Add(1 * time.Minute),
@@ -57,25 +57,25 @@ func TestSet(t *testing.T) {
 func TestGet(t *testing.T) {
 	tests := []struct {
 		name string
-		key  uint64
+		key  string
 		want []byte
 		ok   bool
 	}{
 		{
 			"returns right response",
-			1,
+			"https://example.com/foo",
 			[]byte("value 1"),
 			true,
 		},
 		{
 			"returns right response",
-			2,
+			"https://example.com/bar",
 			[]byte("value 2"),
 			true,
 		},
 		{
 			"key does not exist",
-			4,
+			"https://example.com/qux",
 			nil,
 			false,
 		},
@@ -98,23 +98,23 @@ func TestGet(t *testing.T) {
 func TestRelease(t *testing.T) {
 	tests := []struct {
 		name string
-		key  uint64
+		key  string
 	}{
 		{
 			"removes cached response from store",
-			1,
+			"https://example.com/foo",
 		},
 		{
 			"removes cached response from store",
-			2,
+			"https://example.com/bar",
 		},
 		{
 			"removes cached response from store",
-			3,
+			"https://example.com/baz",
 		},
 		{
 			"key does not exist",
-			4,
+			"https://example.com/qux",
 		},
 	}
 	for _, tt := range tests {
