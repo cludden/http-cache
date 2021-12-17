@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"testing"
@@ -16,7 +17,7 @@ const maxEntrySize = 256
 func BenchmarkHTTPCacheMamoryAdapterSet(b *testing.B) {
 	cache, expiration := initHTTPCacheMamoryAdapter(b.N)
 	for i := 0; i < b.N; i++ {
-		cache.Set(fmt.Sprintf("%d", i), value(), expiration)
+		cache.Set(context.Background(), fmt.Sprintf("%d", i), value(), expiration)
 	}
 }
 
@@ -31,12 +32,12 @@ func BenchmarkHTTPCacheMamoryAdapterGet(b *testing.B) {
 	b.StopTimer()
 	cache, expiration := initHTTPCacheMamoryAdapter(b.N)
 	for i := 0; i < b.N; i++ {
-		cache.Set(fmt.Sprintf("%d", i), value(), expiration)
+		cache.Set(context.Background(), fmt.Sprintf("%d", i), value(), expiration)
 	}
 
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
-		cache.Get(fmt.Sprintf("%d", i))
+		cache.Get(context.Background(), fmt.Sprintf("%d", i))
 	}
 }
 
@@ -61,7 +62,7 @@ func BenchmarkHTTPCacheMamoryAdapterSetParallel(b *testing.B) {
 		id := rand.Intn(1000)
 		counter := 0
 		for pb.Next() {
-			cache.Set(parallelKey(id, counter), value(), expiration)
+			cache.Set(context.Background(), parallelKey(id, counter), value(), expiration)
 			counter = counter + 1
 		}
 	})
@@ -85,14 +86,14 @@ func BenchmarkHTTPCacheMemoryAdapterGetParallel(b *testing.B) {
 	b.StopTimer()
 	cache, expiration := initHTTPCacheMamoryAdapter(b.N)
 	for i := 0; i < b.N; i++ {
-		cache.Set(fmt.Sprintf("%d", i), value(), expiration)
+		cache.Set(context.Background(), fmt.Sprintf("%d", i), value(), expiration)
 	}
 
 	b.StartTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		counter := 0
 		for pb.Next() {
-			cache.Get(fmt.Sprintf("%d", counter))
+			cache.Get(context.Background(), fmt.Sprintf("%d", counter))
 			counter = counter + 1
 		}
 	})

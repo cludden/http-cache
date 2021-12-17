@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"runtime"
@@ -41,11 +42,11 @@ func benchmarkHTTPCacheMemoryAdapter() {
 
 	for i := 0; i < entries; i++ {
 		key, val := generateKeyValue(i, valueSize)
-		cache.Set(key, val, expiration)
+		cache.Set(context.Background(), key, val, expiration)
 	}
 
 	firstKey, _ := generateKeyValue(1, valueSize)
-	checkFirstElementBool(cache.Get(firstKey))
+	checkFirstElementBool(cache.Get(context.Background(), firstKey))
 
 	fmt.Println("GC pause for http-cache memory adapter: ", gcPause())
 

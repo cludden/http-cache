@@ -26,6 +26,7 @@ package cache
 
 import (
 	"bytes"
+	"context"
 	"encoding/gob"
 	"errors"
 	"fmt"
@@ -42,13 +43,13 @@ import (
 type Adapter interface {
 	// Get retrieves the cached response by a given key. It also
 	// returns true or false, whether it exists or not.
-	Get(key string) ([]byte, bool)
+	Get(context.Context, string) ([]byte, bool)
 
 	// Set caches a response for a given key until an expiration date.
-	Set(key string, response []byte, expiration time.Time)
+	Set(context.Context, string, []byte, time.Time)
 
 	// Release frees cache for a given key.
-	Release(key string)
+	Release(context.Context, string)
 }
 
 // =============================================================================
@@ -195,6 +196,7 @@ func NewClient(opts ...ClientOption) (*Client, error) {
 func (c *Client) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if c.cacheableFn(r) {
+			ctx := r.Context()
 			params := r.URL.Query()
 			_, isRefresh := params[c.refreshKey]
 			if isRefresh {
@@ -210,15 +212,15 @@ func (c *Client) Middleware(next http.Handler) http.Handler {
 			}
 
 			if isRefresh {
-				c.adapter.Release(key)
+				c.adapter.Release(ctx, key)
 			} else {
-				b, ok := c.adapter.Get(key)
+				b, ok := c.adapter.Get(ctx, key)
 				response := BytesToResponse(b)
 				if ok {
 					if response.Expiration.After(time.Now()) {
 						response.LastAccess = time.Now()
 						response.Frequency++
-						c.adapter.Set(key, response.Bytes(), response.Expiration)
+						c.adapter.Set(ctx, key, response.Bytes(), response.Expiration)
 
 						//w.WriteHeader(http.StatusNotModified)
 						for k, v := range response.Header {
@@ -228,7 +230,7 @@ func (c *Client) Middleware(next http.Handler) http.Handler {
 						return
 					}
 
-					c.adapter.Release(key)
+					c.adapter.Release(ctx, key)
 				}
 			}
 
@@ -248,7 +250,7 @@ func (c *Client) Middleware(next http.Handler) http.Handler {
 					LastAccess: now,
 					Frequency:  1,
 				}
-				c.adapter.Set(key, response.Bytes(), response.Expiration)
+				c.adapter.Set(ctx, key, response.Bytes(), response.Expiration)
 			}
 			for k, v := range result.Header {
 				w.Header().Set(k, strings.Join(v, ","))

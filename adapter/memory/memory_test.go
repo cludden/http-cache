@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"context"
 	"reflect"
 	"sync"
 	"testing"
@@ -45,7 +46,7 @@ func TestGet(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			b, ok := a.Get(tt.key)
+			b, ok := a.Get(context.Background(), tt.key)
 			if ok != tt.ok {
 				t.Errorf("memory.Get() ok = %v, tt.ok %v", ok, tt.ok)
 				return
@@ -98,7 +99,7 @@ func TestSet(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			a.Set(tt.key, tt.response.Bytes(), tt.response.Expiration)
+			a.Set(context.Background(), tt.key, tt.response.Bytes(), tt.response.Expiration)
 			if cache.BytesToResponse(a.store[tt.key]).Value == nil {
 				t.Errorf(
 					"memory.Set() error = store[%v] response is not %s", tt.key, tt.response.Value,
@@ -150,7 +151,7 @@ func TestRelease(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			a.Release(tt.key)
+			a.Release(context.Background(), tt.key)
 			if len(a.store) > tt.storeLength {
 				t.Errorf("memory.Release() error; store length = %v, want 0", len(a.store))
 			}

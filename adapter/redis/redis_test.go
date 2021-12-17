@@ -1,22 +1,23 @@
 package redis
 
 import (
+	"context"
 	"reflect"
 	"testing"
 	"time"
 
 	cache "github.com/cludden/http-cache"
+	redisCache "github.com/go-redis/cache/v8"
+	"github.com/go-redis/redis/v8"
 )
 
-var a cache.Adapter
+var a cache.Adapter = NewAdapter(redisCache.New(&redisCache.Options{
+	Redis: redis.NewClient(&redis.Options{
+		Addr: ":6379",
+	}),
+}))
 
 func TestSet(t *testing.T) {
-	a = NewAdapter(&RingOptions{
-		Addrs: map[string]string{
-			"server": ":6379",
-		},
-	})
-
 	tests := []struct {
 		name     string
 		key      string
@@ -48,9 +49,10 @@ func TestSet(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			a.Set(tt.key, tt.response, time.Now().Add(1*time.Minute))
-		})
+		// t.Run(tt.name, func(t *testing.T) {
+		// 	a.Set(context.Background(), tt.key, tt.response, time.Now().Add(1*time.Minute))
+		// })
+		a.Set(context.Background(), tt.key, tt.response, time.Now().Add(1*time.Minute))
 	}
 }
 
@@ -82,7 +84,7 @@ func TestGet(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			b, ok := a.Get(tt.key)
+			b, ok := a.Get(context.Background(), tt.key)
 			if ok != tt.ok {
 				t.Errorf("memory.Get() ok = %v, tt.ok %v", ok, tt.ok)
 				return
@@ -119,8 +121,8 @@ func TestRelease(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			a.Release(tt.key)
-			if _, ok := a.Get(tt.key); ok {
+			a.Release(context.Background(), tt.key)
+			if _, ok := a.Get(context.Background(), tt.key); ok {
 				t.Errorf("memory.Release() error; key %v should not be found", tt.key)
 			}
 		})

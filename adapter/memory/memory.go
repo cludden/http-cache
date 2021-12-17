@@ -25,6 +25,7 @@ SOFTWARE.
 package memory
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -62,7 +63,7 @@ type Adapter struct {
 type AdapterOptions func(a *Adapter) error
 
 // Get implements the cache Adapter interface Get method.
-func (a *Adapter) Get(key string) ([]byte, bool) {
+func (a *Adapter) Get(ctx context.Context, key string) ([]byte, bool) {
 	a.mutex.RLock()
 	response, ok := a.store[key]
 	a.mutex.RUnlock()
@@ -75,7 +76,7 @@ func (a *Adapter) Get(key string) ([]byte, bool) {
 }
 
 // Set implements the cache Adapter interface Set method.
-func (a *Adapter) Set(key string, response []byte, expiration time.Time) {
+func (a *Adapter) Set(ctx context.Context, key string, response []byte, expiration time.Time) {
 	a.mutex.RLock()
 	length := len(a.store)
 	a.mutex.RUnlock()
@@ -90,7 +91,7 @@ func (a *Adapter) Set(key string, response []byte, expiration time.Time) {
 }
 
 // Release implements the Adapter interface Release method.
-func (a *Adapter) Release(key string) {
+func (a *Adapter) Release(ctx context.Context, key string) {
 	a.mutex.RLock()
 	_, ok := a.store[key]
 	a.mutex.RUnlock()
@@ -140,7 +141,7 @@ func (a *Adapter) evict() {
 		}
 	}
 
-	a.Release(selectedKey)
+	a.Release(context.Background(), selectedKey)
 }
 
 // NewAdapter initializes memory adapter.

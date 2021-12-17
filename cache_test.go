@@ -2,6 +2,7 @@ package cache
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -20,7 +21,7 @@ type adapterMock struct {
 
 type errReader int
 
-func (a *adapterMock) Get(key string) ([]byte, bool) {
+func (a *adapterMock) Get(ctx context.Context, key string) ([]byte, bool) {
 	a.Lock()
 	defer a.Unlock()
 	if _, ok := a.store[key]; ok {
@@ -29,13 +30,13 @@ func (a *adapterMock) Get(key string) ([]byte, bool) {
 	return nil, false
 }
 
-func (a *adapterMock) Set(key string, response []byte, expiration time.Time) {
+func (a *adapterMock) Set(ctx context.Context, key string, response []byte, expiration time.Time) {
 	a.Lock()
 	defer a.Unlock()
 	a.store[key] = response
 }
 
-func (a *adapterMock) Release(key string) {
+func (a *adapterMock) Release(ctx context.Context, key string) {
 	a.Lock()
 	defer a.Unlock()
 	delete(a.store, key)
